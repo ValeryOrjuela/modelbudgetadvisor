@@ -10,38 +10,104 @@ cargar_librerias <- function() {
   library(writexl)
 }
 
+# _____________________ Union de Modelos de Federico
+Combinacion <- function(MarcasOff,MarcasOn) {
+
+  ListOff   <- c("Daypart","Agency","Advertiser","Product","Medium","Vehicle")
+  MarcasOff <- MarcasOff[ , !(names(MarcasOff) %in% ListOff)]
+  ListOn    <- c("Conca","Medium","Impressions")
+  MarcasOn  <- MarcasOn[ , !(names(MarcasOn) %in% ListOn)]
+
+  # Convertir la columna "BRAND" a mayúsculas
+  MarcasOff$Brand <- toupper(MarcasOff$Brand)
+  MarcasOn$Brand  <- toupper(MarcasOn$Brand)
+
+  # Cambiar el nombre de la columna "X.U.FEFF.PAIS" a "PAIS"
+  colnames(MarcasOff)[colnames(MarcasOff) == "X.U.FEFF.Country"] <- "PAIS"
+  colnames(MarcasOn)[colnames(MarcasOn) == "X.U.FEFF.Country"]   <- "PAIS"
+
+  # Cambiar el nombre de todas las columnas que quedan en el archivo
+  colnames(MarcasOff)[colnames(MarcasOff) == "Year"]  <- "ANO"
+  colnames(MarcasOn)[colnames(MarcasOn) == "Year"]    <- "ANO"
+  colnames(MarcasOff)[colnames(MarcasOff) == "Month"] <- "MES"
+  colnames(MarcasOn)[colnames(MarcasOn) == "Month"]   <- "MES"
+  colnames(MarcasOff)[colnames(MarcasOff) == "Brand"] <- "MARCA"
+  colnames(MarcasOn)[colnames(MarcasOn) == "Brand"]   <- "MARCA"
+  colnames(MarcasOff)[colnames(MarcasOff)== "Country"]<- "PAIS"
+  colnames(MarcasOn)[colnames(MarcasOn)== "Country"]  <- "PAIS"
+  colnames(MarcasOff)[colnames(MarcasOff)== "Investment"]<- "INVERSION"
+  colnames(MarcasOn)[colnames(MarcasOn)== "Investment"]  <- "INVERSION"
+  colnames(MarcasOff)[colnames(MarcasOff) == "Week_Year"]<- "SEMANA"
+
+  MarcasOff <- MarcasOff %>% group_by(PAIS,ANO,MES,MARCA)  %>%  summarise(INVERSION = sum(INVERSION, na.rm = T),
+                                                                          GRPS = sum(GRPS, na.rm = T))
+
+  # Realizar uniones de ambas bases de datos, online y offline
+  data      <- left_join(x=MarcasOff, y=MarcasOn, by = c("PAIS","ANO", "MES", "MARCA"))
+
+  #Realizar la sumatoria de ambas bases de datos
+  data$INVERSION <- ifelse(is.na(data$INVERSION.y),data$INVERSION.x,((data$INVERSION.x+data$INVERSION.y)))
+  data$INVERSION <- ifelse((is.na(data$INVERSION.x)),data$INVERSION.y,data$INVERSION)
+
+  # Cambiar el nombre de las columnas de Inversion
+  colnames(data)[colnames(data) == "INVERSION.x"]    <- "INVERSION OFF"
+  colnames(data)[colnames(data) == "INVERSION.y"]    <- "INVERSION ON"
+
+  # Poner el formato en termino de plantilla
+  data <- data[,c("ANO","MES","MARCA","INVERSION","GRPS")]
+  colnames(data) <- c("Año", "Mes", "Marcas", "InversionTotal", "GRPS")
+  return(data)
+
+  writexl::write_xlsx(data, "datatransformada.xlsx")
+
+}
+
 # _________________________- Transformación de columnas y filas -_________________________________
 
-Transformacion <- function(inversion,trends,grps,trendsvalue="percentages", year = "")
+Transformacion <- function(inversion,trends,grps,trendsvalue="percentages", year = "", data = "normal")
   {
-             datinv  <- inversion
-             dattrps <- grps
-             datrend <- trends
-             datrend <- datrend[,c(1,2,4:11)]
-             datrend                  <- melt(datrend, id = c('Año', 'Mes'))
-             datrend$Marcas           <- datrend$variable
-             datrend$Trend            <- datrend$value
-             datrend                  <- datrend[,c(1,2,5,6)]
-             dattrps                  <- dattrps[,c(1,2,4,5)]
-             dattrps <- dattrps %>% group_by(Año,Mes,Marcas) %>% summarise(GRPS = sum(GRPS))
-             datinv  <- left_join(x = datinv , y = dattrps, by = c('Año', 'Mes','Marcas'))
+             if (data == "normal") {
+               datinv  <- inversion
+               dattrps <- grps
+               datrend <- trends
+               datrend <- datrend[ , !(names(datrend) %in% "Semana")]
+               datrend <- melt(datrend, id = c('Año', 'Mes'))
+               datrend[is.na(datrend)] = 0
+               datrend$value            <- as.numeric(datrend$value)
+               datrend$Marcas           <- datrend$variable
+               datrend$Trend            <- datrend$value
+               datrend                  <- datrend[ , !(names(datrend) %in% c("variable","value"))]
+               dattrps                  <- dattrps %>% group_by(Año,Mes,Marcas) %>% summarise(GRPS = sum(GRPS))
+               datinv                   <- left_join(x=datinv, y=dattrps, by=c('Año','Mes','Marcas'))
+             } else {
+               datinv  <- inversion
+               datrend <- trends
+               datrend <- datrend[ , !(names(datrend) %in% "Semana")]
+               datrend <- melt(datrend, id = c('Año', 'Mes'))
+               datrend[is.na(datrend)] = 0
+               datrend$value            <- as.numeric(datrend$value)
+               datrend$Marcas           <- datrend$variable
+               datrend$Trend            <- datrend$value
+               datrend                  <- datrend[ , !(names(datrend) %in% c("variable","value"))]
+             }
              if (trendsvalue == "percentages") {
-               datrend <- datrend %>% group_by(Año,Mes,Marcas) %>% summarise(Trend = mean(Trend))
+                 datrend    <- datrend %>% group_by(Año,Mes,Marcas)    %>%  summarise(Trend = mean(Trend))
                if (year != "") {
-                 datt       <- datrend %>% group_by(Marcas, Año, Mes) %>%  filter((Año == year)) %>%  summarise(Trend = round(mean(Trend),0))
-                 dati       <- datinv %>% group_by(Marcas, Año , Mes)  %>%  filter(Año == year ) %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
+                 datt       <- datrend %>% group_by(Marcas, Año, Mes)  %>%  filter(Año == year)  %>%  summarise(Trend     = round(mean(Trend),0))
+                 dati       <- datinv  %>% group_by(Marcas, Año , Mes) %>%  filter(Año == year ) %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
                } else {
-                 datt       <- datrend %>% group_by(Marcas, Año, Mes)  %>%  summarise(Trend = round(sum(Trend),0))
-                 dati       <- datinv %>% group_by(Marcas, Año , Mes)  %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
+                 # Agruparlo por marcas no mas ?
+                 datt       <- datrend %>% group_by(Marcas, Año, Mes)   %>%  summarise(Trend     = round(mean(Trend),0))
+                 dati       <- datinv  %>% group_by(Marcas, Año , Mes)  %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
                }
              } else {
-               datrend <- datrend %>% group_by(Año,Mes,Marcas) %>% summarise(Trend = sum(Trend))
+                 datrend    <- datrend %>% group_by(Año,Mes,Marcas)   %>% summarise(Trend = sum(Trend))
                if (year != "") {
-                 datt       <- datrend %>% group_by(Marcas, Año, Mes) %>%  filter((Año == year)) %>%  summarise(Trend = round(sum(Trend),0))
-                 dati       <- datinv %>% group_by(Marcas, Año , Mes)  %>%  filter(Año == year  ) %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
+                 datt       <- datrend %>% group_by(Marcas, Año, Mes) %>%  filter((Año == year)) %>%  summarise(Trend = round(mean(Trend),0))
+                 dati       <- datinv  %>% group_by(Marcas, Año , Mes)%>%  filter(Año == year  ) %>%  summarise(Inversión = mean(InversionTotal), SOV = sum(GRPS,na.rm=T))
                } else {
                  datt       <- datrend %>% group_by(Marcas, Año, Mes)  %>%  summarise(Trend = round(sum(Trend),0))
-                 dati       <- datinv %>% group_by(Marcas, Año , Mes)  %>%  summarise(Inversión = sum(InversionTotal), SOV = sum(GRPS,na.rm=T))
+                 dati       <- datinv %>% group_by(Marcas, Año , Mes)  %>%  summarise(Inversión = mean(InversionTotal), SOV = sum(GRPS,na.rm=T))
                }
              }
              dati$SOV <- (dati$SOV / sum(dati$SOV))*100
@@ -69,31 +135,32 @@ Union <- function(dat_new,digital ="")
 
 # _________________________- Prueba de Correlaciones -_________________________________
 
-Correlaciones <- function(dat_new1, correlacion = "" )
-{ dat <- dat_new1
-  Marca1 = names(datrend)[4]; Marca2 = names(datrend)[5]
-  Marca3 = names(datrend)[6]; Marca4 = names(datrend)[7]
-  Marca5 = names(datrend)[8]; Marca6 = names(datrend)[9]
-  Marca7 = names(datrend)[10];Marca8 = names(datrend)[11]
-  prueba1 <- dat %>% filter(Marcas == Marca1); value1  <- cor.test(prueba1$Inversión, prueba1$Index)$estimate
-  dat1    <- c(prueba1$Marcas[1],value1)
-  prueba2 <- dat %>% filter(Marcas == Marca2); value2  <- cor.test(prueba2$Inversión, prueba2$Index)$estimate
-  dat2    <- c(prueba2$Marcas[1],value2)
-  prueba3 <- dat %>% filter(Marcas == Marca3); value3  <- cor.test(prueba3$Inversión, prueba3$Index)$estimate
-  dat3    <- c(prueba3$Marcas[1],value3)
-  prueba4 <- dat %>% filter(Marcas == Marca4); value4  <- cor.test(prueba4$Inversión, prueba4$Index)$estimate
-  dat4    <- c(prueba4$Marcas[1],value4)
-  prueba5 <- dat %>% filter(Marcas == Marca5); value5  <- cor.test(prueba5$Inversión, prueba5$Index)$estimate
-  dat5    <- c(prueba5$Marcas[1],value5)
-  prueba6 <- dat %>% filter(Marcas == Marca6); value6  <- cor.test(prueba6$Inversión, prueba6$Index)$estimate
-  dat6    <- c(prueba6$Marcas[1],value6)
-  prueba7 <- dat %>% filter(Marcas == Marca7); value7  <- cor.test(prueba7$Inversión, prueba7$Index)$estimate
-  dat7    <- c(prueba7$Marcas[1],value7)
-  prueba8 <- dat %>% filter(Marcas == Marca8); value8  <- cor.test(prueba8$Inversión, prueba8$Index)$estimate
-  dat8    <- c(prueba8$Marcas[1],value8)
-  TablaFrecuencias <- data.frame(dat1,dat2,dat3,dat4,dat5,dat6,dat7,dat8)
+Correlaciones <- function(trend, dat_new1)
+{ dat    <- dat_new1
+  numcol <- ncol(trend)
+  col    <- (numcol - 3)
+  Marca  <- vector("character", col)
+  Answer <- vector("logical", col)
+  Prueba <- list()
+  Value  <- list()
+  Resultados  <- list()
+  datNo  <- data.frame(Marcas_ = character() , Correlacion = numeric())
+  for (i in 4:numcol) {Marca[[i]] <- names(trend)[i]}
+  Marca <- Marca[4:numcol]
+  nombres_df <- paste0("df_", Marca)
+  for (i in 1:col) {
+      Answer[[i]] <- any(dat$Marcas == paste0( "" ,Marca[[i]], ""))
+    if (!Answer[[i]]){
+      next
+    } else {
+      df_actual  <- dat %>% filter(Marcas == paste0( "" ,Marca[i], ""))
+      assign(nombres_df[i], df_actual)
+      Resultados[[i]] <- cor.test(df_actual$Inversión, df_actual$Index)$estimate
+      datNo           <- rbind(datNo, data.frame(Marcas_ = Marca[[i]], Correlacion = Resultados[[i]]))
+    }
+  }
+  TablaFrecuencias <- data.frame(datNo)
   writexl::write_xlsx(TablaFrecuencias, "TablaFrecuencias.xlsx")
-
   }
 
 # ___________________________________- MODELO DE PREDICCIÓN -_________________________________
@@ -109,11 +176,23 @@ Modelo <- function(dat_new1,Marcas = "" ,fecha=(060223)) {
   dati      <- dat_new2 %>% group_by(Marcas,Año,Mes) %>%  summarise(Inversión = sum(Inversión), SOV = mean(SOV,na.rm=T), Trend = mean(Trend,na.rm=T), Index = mean(Index,na.rm=T))
   dati1     <- dat_new2 %>% group_by(Marcas,Año) %>%  summarise(Inversión = sum(Inversión), SOV = mean(SOV,na.rm=T), Trend = mean(Trend,na.rm=T), Index = mean(Index,na.rm=T))
   dati1     <- dati1 %>% arrange(Index)
+  dati2     <- dati1
+  TotalSov  <- sum(dati2$SOV)
+  TotalTrend<- sum(dati2$Trend)
+  TotalIndex<- sum(dati2$Index)
+  dati2$SOV <- (dati2$SOV/TotalSov)*100
+  dati2$Trend <- (dati2$Trend/TotalTrend)*100
+
+  # Truncar la columna "Index" a los dos primeros dígitos
+  dati2$Index <- as.integer(substring(dati2$Index, 1, 2))
   }
-  dati1_1   <- dati1[,c(1,3:6)]
-  writexl::write_xlsx(dati1_1, "BubblesTable.xlsx")
+  #dati1_1   <- dati1[,c(1,3:6)]
+  #writexl::write_xlsx(dati1_1, "BubblesTable.xlsx")
+  dati1_1   <- dati2[,c(1,3:6)]
+  writexl::write_xlsx(dati2, "BubblesTable.xlsx")
   print("Base de datos agrupada por marca, Año y mes")
   print(dati1)
+  print(dati2)
   # Data 1
   data1 <- dati
   data1 <- data1[,c(4,7)]
